@@ -4,12 +4,14 @@ A library for cPanel's WHM API and cPanel API (UAPI)
 import requests
 from collections import namedtuple
 from typing import Iterable, Optional
+from .exceptions import SortedFieldNotDisplayed
 
-__all__ = ['Whm', 'Filter']
+__all__ = ['Whm', 'FieldFilter', 'FieldSort']
 LATEST_WHM_API_VERSION = '1'
 
 
-Filter = namedtuple('WhmFilter', ['field', 'filter_type', 'arg'])
+FieldFilter = namedtuple('ColFilter', ['field', 'filter_type', 'arg'])
+FieldSort = namedtuple('ColSort', ['field', 'method', 'reverse'], defaults=['lexicographic', 0])
 
 
 class Whm:
@@ -34,15 +36,16 @@ class Whm:
         self.whmhost = whmhost
         self.whmport = whmport
 
-    def _call(self, method: str, params: Optional[dict] = None, filters: Optional[Iterable[Filter]] = None,
-              columns: Optional[Iterable[str]] = None) -> dict:
+    def _call(self, method: str, params: Optional[dict] = None, filters: Optional[Iterable[FieldFilter]] = None,
+              fields: Optional[Iterable[str]] = None, fieldsorts: Optional[Iterable[FieldSort]] = None) -> dict:
         """
         Make the API call
 
         :param method: The API method to call
         :param params: Any parameters
         :param filters: Any filters
-        :param columns: Display only these columns, or all if non specified
+        :param fields: Display only these fields, or all if non specified
+        :param fieldsorts: Columns to sort on. Order of columns applies
         :return:
         """
         if params is None:
@@ -55,24 +58,38 @@ class Whm:
             request_parameters[k] = v
 
         if filters is not None:
-            fp = 'api.filter'
-            request_parameters[f'{fp}.enable'] = 1
+            mp = 'api.filter'
+            request_parameters[f'{mp}.enable'] = 1
             current_filter_ord = ord('a')  # Start out at 'a'
             for f in filters:
-                fpl = f'{fp}.{chr(current_filter_ord)}'
-                request_parameters[f'{fpl}.field'] = f.field
-                request_parameters[f'{fpl}.type'] = f.filter_type
-                request_parameters[f'{fpl}.arg0'] = f.arg
+                mpl = f'{mp}.{chr(current_filter_ord)}'
+                request_parameters[f'{mpl}.field'] = f.field
+                request_parameters[f'{mpl}.type'] = f.filter_type
+                request_parameters[f'{mpl}.arg0'] = f.arg
                 current_filter_ord += 1
 
-        if columns is not None:
-            cp = 'api.columns'
-            request_parameters[f'{cp}.enable'] = 1
+        if fields is not None:
+            mp = 'api.columns'
+            request_parameters[f'{mp}.enable'] = 1
             current_column_ord = ord('a')  # Start out at 'a'
-            for c in columns:
-                fpl = f'{cp}.{chr(current_column_ord)}'
-                request_parameters[fpl] = c
+            for c in fields:
+                mpl = f'{mp}.{chr(current_column_ord)}'
+                request_parameters[mpl] = c
                 current_column_ord += 1
+
+        if fieldsorts is not None:
+            mp = 'api.sort'
+            request_parameters[f'{mp}.enable'] = 1
+            current_filter_ord = ord('a')  # Start out at 'a'
+            for cs in fieldsorts:
+                if fields is not None and cs.field not in fields:
+                    m = f''
+                    raise SortedFieldNotDisplayed(f'Filed {cs.field} is specified in the sort, but not displayed')
+                mpl = f'{mp}.{chr(current_filter_ord)}'
+                request_parameters[f'{mpl}.field'] = cs.field
+                request_parameters[f'{mpl}.method'] = cs.method
+                request_parameters[f'{mpl}.reverse'] = cs.reverse
+                current_filter_ord += 1
 
         r = requests.get(url=request_url, params=request_parameters, headers=request_headers)
         print(r.url)
